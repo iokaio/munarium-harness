@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "munarium-harness"
+version = "0.1.0-dev"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+description = "Client-side proposal building, typed outcome retrieval, and refusal diagnostics."
+repository = "https://github.com/iokaio/munarium-harness"
+readme = "README.md"
+publish = false
+
+[dependencies]
