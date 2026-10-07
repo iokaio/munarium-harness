@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Stage 1 service composition
+on:
+  workflow_dispatch:
+    inputs:
+      server_revision:
+        description: Exact reviewed munarium commit
+        required: true
+      warden_revision:
+        description: Exact reviewed Warden commit
+        required: true
+      registry_revision:
+        description: Exact reviewed Registry commit
+        required: true
+      gate_revision:
+        description: Exact reviewed Gate commit
+        required: true
+      platform_revision:
+        description: Exact reviewed platform hub commit
+        required: true
+permissions:
+  contents: read
+jobs:
+  service-composition:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Validate immutable component revisions
+        shell: pwsh
+        env:
+          SERVER: ${{ inputs.server_revision }}
+          WARDEN: ${{ inputs.warden_revision }}
+          REGISTRY: ${{ inputs.registry_revision }}
+          GATE: ${{ inputs.gate_revision }}
+          PLATFORM: ${{ inputs.platform_revision }}
+        run: |
+          foreach ($revision in @($env:SERVER,$env:WARDEN,$env:REGISTRY,$env:GATE,$env:PLATFORM)) {
+            if ($revision -notmatch '^[0-9a-f]{40}$') { throw 'Exact commit required' }
+          }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: munarium-harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium
+          ref: ${{ inputs.server_revision }}
+          path: munarium
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-warden
+          ref: ${{ inputs.warden_revision }}
+          path: munarium-warden
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-registry
+          ref: ${{ inputs.registry_revision }}
+          path: munarium-registry
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-gate
+          ref: ${{ inputs.gate_revision }}
+          path: munarium-gate
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-platform
+          ref: ${{ inputs.platform_revision }}
+          path: munarium-platform
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Build exact component sources
+        shell: pwsh
+        env:
+          RUSTUP_TOOLCHAIN: '1.98.1'
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($repo in @('munarium/server','munarium-warden','munarium-registry','munarium-gate')) {
+            cargo build --locked --manifest-path "$repo/Cargo.toml"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          python -m pip install -e './munarium/clients/python[dev,platform-test]'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Invoke-WebRequest -Uri https://github.com/open-policy-agent/opa/releases/download/v1.21.1/opa_windows_amd64.exe -OutFile munarium-gate/target/opa.exe
+      - name: Isolated mTLS composition and lost-acknowledgement recovery
+        shell: pwsh
+        working-directory: munarium-harness
+        run: python scripts/run_services.py --workspace .. --opa ../munarium-gate/target/opa.exe --output target/service-run.json
+      - name: Retain sanitized composition evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage1-service-evidence
+          path: |
+            munarium-harness/target/service-run.json
+            munarium-harness/target/service-run.log
+          if-no-files-found: error

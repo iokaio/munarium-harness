@@ -7,12 +7,11 @@ act on correctly. Its purpose is adoption and consistency. **It does not create 
 inside the agent that uses it.** Gate, Server, Warden and Council verify every request even when
 Harness is bypassed, modified or absent.
 
-> **Status: Planned — Rust scaffold present.** This checkout contains a dependency-free,
-> non-publishable [Cargo library](Cargo.toml) and documented interfaces under [src/](src/lib.rs).
-> The interfaces have no implementations: no runtime service, client transport, database,
-> provider integration or contract implementation is available. No production path is qualified.
-> Build checks validate source structure, not governance capabilities. The
-> [capability table](#capability-status) remains the authoritative functional status.
+> **Status: Stage 1 clients implemented.** The authenticated service/client
+> profile is implemented and covered by component and separate-process tests.
+> See the [service profile](docs/service-profile.md). Candidates remain inactive;
+> no execution endpoint is mounted. Human acceptance and production qualification
+> remain pending.
 
 Harness is one of nine components built around the existing Munarium foundation, Munarium Server
 and Munarium Matrix. Their shared architecture, normative contracts, decision records, roadmap and
@@ -27,7 +26,8 @@ proprietary edition.
 Read the [development index](docs/README.md), then the [architecture](docs/architecture.md),
 [implementation plan](docs/implementation-plan.md) and [validation guide](docs/validation.md).
 They map the public platform plan to source modules, dependencies, a first bounded work item
-and acceptance cases. Runtime capabilities remain planned; supported contract versions are **none**.
+and acceptance cases. See the experimental [Stage 1 implementation](docs/stage1.md).
+Released supported contract versions remain **none**.
 
 ## What Harness is for
 
@@ -119,19 +119,19 @@ repository is at **repository created**.
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Rust contract fixtures: canonical bytes, digests, error codes, outcome vectors | Planned | none |
-| One practical application client (Python or .NET, decided with the first reference application) | Planned | none |
-| Typed Action Proposal builder and closed outcome vocabulary | Planned | none |
+| Rust canonical bytes/digests and outcome vectors | Experimental | [Tests](tests/decision.rs) |
+| Python application client with supplied transport | Experimental | [Client and tests](docs/stage1.md) |
+| Typed proposal builder and closed outcome vocabulary | Experimental | [Stage 1](docs/stage1.md) |
 | Decision explanations and refusal diagnostics without cross-tenant disclosure | Planned | none |
 | Local examples: fake ticket, harmless approved effect, blocked governance mutation, ambiguous target response | Planned | none |
 | Developer command line: local setup, explain, replay, diagnostic export | Planned | none |
-| Second language binding | Planned, after conformance of the first | none |
+| Independent Rust and Python decision clients | Experimental | [Unchanged vectors](contracts/stage1/README.md) |
 | MCP client adapter with a narrow synthesized tool surface | Planned | none |
 | TypeScript and Java bindings | Deferred; follow demand and evidence | none |
 | LangGraph, Semantic Kernel, OpenAI and Claude agent SDK, Google ADK adapters | Deferred; each separately qualified | none |
 
-Supported contract versions: **none**. Published packages: **none**. Operations available today:
-**none**.
+Released contract versions: **none**. Published packages: **none**. Experimental library
+operations and composition are described in [Stage 1](docs/stage1.md).
 
 ## Acceptance evidence for the first release
 
@@ -170,7 +170,8 @@ A blank evidence field means unverified, not passed.
 - **Gate** is what the client talks to; **Registry** manifests define the tool surface an MCP
   adapter synthesizes; **Console** shares the outcome vocabulary and the rule against retrying the
   unresolved.
-- **External dependencies.** None chosen.
+- **External dependencies.** See [Cargo.toml](Cargo.toml), the lockfile and
+  [dependency notices](THIRD_PARTY_NOTICES.md). Stage 1 choices remain experimental.
 
 ## Not in scope
 
@@ -200,8 +201,8 @@ not.
 
 | Path | What exists |
 |---|---|
-| [Cargo.toml](Cargo.toml), [Cargo.lock](Cargo.lock) | Independent library, version 0.1.0-dev, publishing disabled, no external crate dependencies |
-| [src/lib.rs](src/lib.rs) | Documented proposed module interfaces; no runtime implementations |
+| [Cargo.toml](Cargo.toml), [Cargo.lock](Cargo.lock) | Independent library, version 0.1.0-dev, publishing disabled, reviewed locked dependencies |
+| [src/lib.rs](src/lib.rs) | Experimental decision implementation and proposed later-stage interfaces |
 | [docs/](docs/README.md) | Architecture, implementation sequence and acceptance specifications |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md) | Contribution process and aligned development guidance |
 | [.github/workflows/](.github/workflows/) | Automatic Rust, repository-hygiene and DCO checks |
@@ -209,14 +210,15 @@ not.
 | [LICENSE](LICENSE), [NOTICE](NOTICE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licensing and dependency notices |
 
 Subsystem modules: [proposal](src/proposal.rs), [client](src/client.rs), [recovery](src/recovery.rs).
-Tests, fixtures, migrations, binaries and deployment assets arrive with the implementation that
-uses them. The scaffold defines no shared wire types and depends on no sibling checkout.
+Stage 1 tests and candidate fixtures are implemented. The ordinary component build depends on
+no sibling checkout; Harness owns the separate experimental composition.
 
 ## Development
 
 Use Rust 1.98.1 with rustfmt, Clippy and the platform's native linker. From this repository root:
 
 ```console
+cargo fetch --locked
 cargo fmt --all --check
 cargo build --offline --locked
 cargo clippy --offline --locked --all-targets -- -D warnings
@@ -224,9 +226,8 @@ cargo test --offline --locked
 cargo doc --offline --locked --no-deps
 ```
 
-The crate currently has **zero runtime or conformance tests**. A successful test command checks
-the scaffold only. The [validation guide](docs/validation.md) gives the required behavioral
-test specifications and explains how to retain evidence when they are implemented.
+The [Stage 1 guide](docs/stage1.md) names the implemented tests and remaining coverage.
+The [validation guide](docs/validation.md) retains the broader acceptance specifications.
 
 Also run the existing hygiene gates:
 
