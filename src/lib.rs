@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Munarium Harness: implementation scaffolding only.
+//! Munarium Harness: Stage 1 decision library.
 //!
 //! Client-side proposal building, typed outcome retrieval, and refusal diagnostics.
 //!
-//! These modules declare proposed in-process interfaces with associated types.
-//! There are no implementations, wire contracts, listeners, storage backends,
-//! credentials, or runtime capabilities. No production path is qualified.
+//! The decision module implements the proposed Stage 1 candidate contracts.
+//! Other modules retain proposed later-stage interfaces. There is no network listener
+//! or execution admission. No production path is qualified.
 //! See `docs/architecture.md` and `docs/implementation-plan.md` in this repository.
 //!
 //! The interfaces are provisional and may change before the first implementation.
@@ -15,5 +15,7 @@
 #![deny(missing_docs)]
 
 pub mod client;
+pub mod decision;
+pub mod https;
 pub mod proposal;
 pub mod recovery;
