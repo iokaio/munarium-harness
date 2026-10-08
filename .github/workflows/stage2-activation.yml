@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium
-          ref: 059ee3f3305e17d96581822827f182ce927db615 # Server participant PR 77
+          ref: 7d4a4d836fb483e7dad056f167f3a965d793d229 # Merged Server participant
           path: munarium
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,19 +51,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-registry
-          ref: eb08f75deaae664afd067194241ae4646c3d53ce
+          ref: 91d4305a3241c9f3bf4e5cf011400d4a6e5b2353
           path: munarium-registry
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-gate
-          ref: bc429ebcce47579419d88daa6a6aee644fd34221
+          ref: f8df9736045214c204921f358b296c27d58fc868
           path: munarium-gate
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-warden
-          ref: ef08b587b259600864e3b4f48935e44fa00b7134
+          ref: f0bfdda6d11060dccdbc4cefc2a5b805c44c0d87
           path: munarium-warden
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

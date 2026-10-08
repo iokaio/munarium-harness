@@ -36,7 +36,8 @@ def main():
             availability="all five binaries and explicit database inputs present; connectivity checked by scenario",
             cost_authority="existing local/CI host only", expiry="end of test; caller removes isolated databases",
             resource_ceiling="32 service requests; test timeout 240 seconds; caller owns database resource limits"),
-        exclusions=["outbox delivery for other participants", "snapshot restore", "execution", "target effects", "network and secret isolation"])
+        participant_outbox_delivery=True,
+        exclusions=["action lifecycle outbox delivery", "snapshot restore", "execution", "target effects", "network and secret isolation"])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     log = args.output.with_suffix(".log")
     if log.exists():

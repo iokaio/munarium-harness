@@ -15,7 +15,7 @@ All four installed heads and immutable receipts must match at completion.
 Gate continues to report `execution_enabled:false` after successful resume.
 
 These are process restart and activation tests. They do not prove snapshot restore,
-outbox delivery for other participants, grant/custody or target behavior, evaluator
+action lifecycle outbox delivery, grant/custody or target behavior, evaluator
 limits, or denied agent network/secret access. No execution endpoint is exercised.
 The fault proxy uses the real Council certificate for its Council-only upstream
 calls; it discards responses only after a real owner has returned success.
@@ -53,3 +53,18 @@ tears down its job services. No paid or production resources are authorized.
 Local Windows evidence and hosted Linux evidence are distinct. The passing
 activation scenario is an experimental composition result, not human acceptance,
 execution qualification, or permission to merge/release.
+
+## Participant delivery extension
+
+The composition also enrolls each participant as its own Server recorder, with
+real Warden provider assertions and dedicated activation source streams. After the
+six existing activation response-loss histories, it rejects a reader's flush,
+substitutes a wrong acknowledgement, loses the real committed acknowledgement,
+restarts each owner and verifies recovery of the original Server acknowledgement.
+A second flush returns zero; delivery never changes execution availability.
+
+The fault proxy forwards as the actual enrolled caller and accepts only the named
+service certificates. No recording identity or acknowledgement is accepted from
+an ordinary test caller. The fixture uses one provider binding per workload
+subject, with recipient-specific policies narrowing its allowed audience/resource.
+This remains activation/audit integration, not action effect qualification.

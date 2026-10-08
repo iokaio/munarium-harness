@@ -37,7 +37,7 @@ def test_real_activation_barrier():
     canonical, digest, b64 = fixture.canonical, fixture.digest, fixture.b64
     names = ("svc-council", "svc-registry", "svc-gate", "svc-warden")
     peers = names + ("proposer", "human", "outsider")
-    with fixture.deployment("postgres", peers) as d, ExitStack() as stack:
+    with fixture.deployment("postgres", peers, record_peers=names) as d, ExitStack() as stack:
         tenant, directory = d["tenant"], d["directory"]
         identities = dict(d["identities"], **{"svc-server": d["server_identity"]})
         ports = {name: fixture.port() for name in names}
@@ -94,6 +94,21 @@ def test_real_activation_barrier():
             schema_version=1, binding_id="gate", deployment="stage1-live", tenant=tenant, provider_issuer="fixture-provider", provider_subject="svc-gate",
             origin_kind="service", origin="svc-gate", peer_service="svc-gate", audiences=["svc-registry"], scopes=["read", "propose"],
             resources=["registry:"+tenant], nbf=now-10, exp=now+900)])
+        delivery_owners = ("svc-registry", "svc-warden", "svc-gate")
+        record_restriction = dict(restriction, resources=["action-records:"+tenant])
+        bindings["identity:svc-server"] = dict(keys={"warden": dict(public_key=b64(issuer.public_key().public_bytes_raw()), issuer="warden", decision=True)},
+            peers={p: dict(task=record_restriction, policy=record_restriction, maximum_depth=0) for p in delivery_owners}, registrations=[])
+        for p in delivery_owners:
+            bindings["action-records:svc-server"]["streams"].append(dict(stream_id=p+"-activation", producer=p.removeprefix("svc-"), service=p, generation=1, kinds=["activation-applied"]))
+            bindings["warden"]["providers"]["workload"]["subjects"][p] = "service"
+            bindings["warden"]["bindings"].append(dict(schema_version=1, binding_id=p+"-record", deployment="stage1-live", tenant=tenant,
+                provider_issuer="fixture-provider", provider_subject=p, origin_kind="service", origin=p, peer_service=p, audiences=["svc-server"],
+                scopes=["read", "propose"], resources=["action-records:"+tenant], nbf=now-10, exp=now+900))
+        # One provider enrollment per subject; recipient policies narrow each audience.
+        bindings["warden"]["bindings"] = [b for b in bindings["warden"]["bindings"] if b["binding_id"] != "gate"]
+        gate_binding = next(b for b in bindings["warden"]["bindings"] if b["peer_service"] == "svc-gate")
+        gate_binding["audiences"].append("svc-registry")
+        gate_binding["resources"].append("registry:"+tenant)
         governance = dict(schema_version=1, bindings=bindings, retire_bootstrap=False, successor_keys={})
         path = {"tenant": tenant}
         state = d["api"].get_platform_authority(ApiRequest(path=path)).json()
@@ -102,15 +117,15 @@ def test_real_activation_barrier():
         clients = {p: stack.enter_context(d["http"](identities[p])) for p in peers}
         for client in clients.values():
             client.timeout = httpx.Timeout(30)
-        faults = {"phase": None, "hits": [], "statuses": []}
-        upstream = clients["svc-council"]
+        faults = {"phase": None, "hits": [], "statuses": [], "delivery": None, "mode": None, "acks": {}}
 
         class Boundary(BaseHTTPRequestHandler):
             def log_message(self, *_args):
                 pass
 
             def forward(self):
-                if hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest() != identities["svc-council"][2]:
+                caller = next((p for p in names if identities[p][2] == hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest()), None)
+                if caller is None:
                     self.send_error(403)
                     return
                 length = int(self.headers.get("Content-Length", "0"))
@@ -124,7 +139,7 @@ def test_real_activation_barrier():
                     if route.startswith(prefix+"/"):
                         owner, route = candidate, route[len(prefix):]
                         break
-                response = upstream.request(self.command, endpoints[owner]+route, content=raw, headers={"Content-Type": "application/json"})
+                response = clients[caller].request(self.command, endpoints[owner]+route, content=raw, headers={"Content-Type": "application/json"})
                 operation = json.loads(raw)["action"]["operation"] if raw else "read"
                 phase = owner+":"+operation
                 if self.command == "POST":
@@ -137,11 +152,22 @@ def test_real_activation_barrier():
                     self.connection.shutdown(socket.SHUT_RDWR)
                     self.close_connection = True
                     return
+                content = response.content
+                if response.status_code == 200 and operation == "action-append" and caller == faults["delivery"]:
+                    faults["acks"][caller] = response.json()
+                    if faults["mode"] == "lost":
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                        self.close_connection = True
+                        return
+                    if faults["mode"] == "wrong":
+                        wrong = response.json()
+                        wrong["event_digest"] = "sha256:"+"0"*64
+                        content = canonical(wrong)
                 self.send_response(response.status_code)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(response.content)))
+                self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
-                self.wfile.write(response.content)
+                self.wfile.write(content)
 
             do_GET = forward
             do_POST = forward
@@ -178,6 +204,11 @@ def test_real_activation_barrier():
             provider_token_file=str(directory / "unused-token"), journal=str(directory / "gate.sqlite"), registry_endpoint=endpoints["svc-registry"],
             warden_endpoint=endpoints["svc-warden"], evaluator=dict(python="unused", worker="unused", executable="unused", worker_digest="unused", executable_digest="unused", version="unused", capabilities={}),
             activation=dict(database_url_file=str(directory / "gate-url"), council_endpoint=endpoints["svc-council"]))
+        for p in delivery_owners:
+            token_file = directory / (p+"-token")
+            token_file.write_text(sign(provider, dict(alg="EdDSA", kid="provider", typ="at+jwt"), dict(iss="fixture-provider", sub=p, aud="warden-admission", iat=now-5, nbf=now-5, exp=now+900)))
+            configs[p]["delivery"] = dict(server_service="svc-server", warden_endpoint=endpoints["svc-warden"], provider_id="workload", provider_token_file=str(token_file))
+            configs[p]["server_endpoint"] = proxy
         processes = {}
 
         def stop(name):
@@ -267,3 +298,22 @@ def test_real_activation_barrier():
             receipt = call(owner, "activation-lookup" if owner == "svc-gate" else "lookup", "svc-council", transition_id=transition_id).json()
             assert receipt == receipts[owner]
         assert len(faults["hits"]) == 6
+
+        for owner in delivery_owners:
+            assert call(owner, "flush", "human").status_code == 403, "read enrollment cannot deliver"
+            faults.update(delivery=owner, mode="wrong")
+            wrong = call(owner, "flush", "svc-council")
+            assert wrong.status_code != 200, f"{owner} must reject wrong custody acknowledgement"
+            assert owner in faults["acks"], f"{owner} must reach real Server append"
+            original = faults["acks"][owner]
+            faults["mode"] = "lost"
+            assert call(owner, "flush", "svc-council").status_code == 503, "lost acknowledgement must remain pending"
+            assert faults["acks"][owner] == original, "duplicate append must retain Server position and time"
+            stop(owner)
+            start(owner)
+            faults["mode"] = None
+            delivered = call(owner, "flush", "svc-council")
+            assert delivered.status_code == 200, f"{owner} must recover delivery after restart"
+            assert delivered.json() == dict(delivered=1, acknowledgement=original)
+            assert call(owner, "flush", "svc-council").json() == dict(delivered=0)
+            assert call("svc-gate", "activation-head", "svc-council").json()["execution_enabled"] is False
