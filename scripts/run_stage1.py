@@ -25,9 +25,9 @@ def sha(raw):
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
-def sources(workspace):
+def sources(workspace, names=("munarium", "munarium-platform", "munarium-registry", "munarium-warden", "munarium-gate", "munarium-harness")):
     pins = {}
-    for name in ("munarium", "munarium-platform", "munarium-registry", "munarium-warden", "munarium-gate", "munarium-harness"):
+    for name in names:
         path = workspace / name
         git = ["git", "-c", f"safe.directory={path.as_posix()}", "-C", str(path)]
         def read(*args):
