@@ -23,7 +23,8 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 
-def test_real_activation_barrier():
+@pytest.mark.parametrize("execution_case", ["effects", "admission"] if os.environ.get("STAGE2_EXECUTION") == "1" else ["activation"])
+def test_real_activation_barrier(execution_case):
     workspace = os.environ.get("STAGE2_WORKSPACE")
     if not workspace:
         pytest.skip("explicit Stage 2 workspace required")
@@ -36,7 +37,8 @@ def test_real_activation_barrier():
     from munarium_client import ApiRequest
     canonical, digest, b64 = fixture.canonical, fixture.digest, fixture.b64
     names = ("svc-council", "svc-registry", "svc-gate", "svc-warden")
-    peers = names + ("proposer", "human", "outsider")
+    execution_enabled = os.environ.get("STAGE2_EXECUTION") == "1"
+    peers = names + ("proposer", "human", "outsider") + (("connector", "target") if execution_enabled else ())
     with fixture.deployment("postgres", peers, record_peers=names) as d, ExitStack() as stack:
         tenant, directory = d["tenant"], d["directory"]
         identities = dict(d["identities"], **{"svc-server": d["server_identity"]})
@@ -64,6 +66,8 @@ def test_real_activation_barrier():
         envelope = sign(publisher, dict(alg="Ed25519", kid="key-1", typ="munarium-manifest+jws"), manifest)
         manifest_digest = digest("munarium:manifest:v2", manifest)
         policy_bytes = {"purpose": "activation-composition-only"}
+        if execution_enabled:
+            policy_bytes = {"purpose": "operator-prepared-disposable-release", "operation": "release.publish_approved_artifact", "limit": 2}
         policy_digest = digest("munarium:decision-policy:v1", policy_bytes)
         records = json.loads((workspace / "munarium-council/contracts/stage2-v1/vectors.json").read_bytes())["records"]
         transition = records["activation"]
@@ -109,6 +113,11 @@ def test_real_activation_barrier():
         gate_binding = next(b for b in bindings["warden"]["bindings"] if b["peer_service"] == "svc-gate")
         gate_binding["audiences"].append("svc-registry")
         gate_binding["resources"].append("registry:"+tenant)
+        execution = None
+        if execution_enabled:
+            from execution_fixture import Execution
+            execution = Execution(fixture, d, workspace, stack, scope, identities, endpoints, records, execution_case)
+            execution.bindings(bindings, now, manifest_digest, policy_digest)
         governance = dict(schema_version=1, bindings=bindings, retire_bootstrap=False, successor_keys={})
         path = {"tenant": tenant}
         state = d["api"].get_platform_authority(ApiRequest(path=path)).json()
@@ -124,7 +133,7 @@ def test_real_activation_barrier():
                 pass
 
             def forward(self):
-                caller = next((p for p in names if identities[p][2] == hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest()), None)
+                caller = next((p for p in names + (("connector",) if execution_enabled else ()) if identities[p][2] == hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest()), None)
                 if caller is None:
                     self.send_error(403)
                     return
@@ -209,6 +218,8 @@ def test_real_activation_barrier():
             token_file.write_text(sign(provider, dict(alg="EdDSA", kid="provider", typ="at+jwt"), dict(iss="fixture-provider", sub=p, aud="warden-admission", iat=now-5, nbf=now-5, exp=now+900)))
             configs[p]["delivery"] = dict(server_service="svc-server", warden_endpoint=endpoints["svc-warden"], provider_id="workload", provider_token_file=str(token_file))
             configs[p]["server_endpoint"] = proxy
+        if execution:
+            execution.configure(configs, sign, provider, now)
         processes = {}
 
         def stop(name):
@@ -317,3 +328,6 @@ def test_real_activation_barrier():
             assert delivered.json() == dict(delivered=1, acknowledgement=original)
             assert call(owner, "flush", "svc-council").json() == dict(delivered=0)
             assert call("svc-gate", "activation-head", "svc-council").json()["execution_enabled"] is False
+        if execution:
+            faults.update(delivery=None, mode=None)
+            execution.exercise(clients, stop, start, faults, proxy)
