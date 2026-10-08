@@ -45,25 +45,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-council
-          ref: 6ea0822b6ad2da29ca051410289422d9ccaa4c54
+          ref: 24babfd88991386d6e850dfe7db013155bfc9beb # Council approval custody
           path: munarium-council
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-registry
-          ref: 91d4305a3241c9f3bf4e5cf011400d4a6e5b2353
+          ref: 243709c6da9f3d77051d19c3535e33d1e4dae226 # Merged Registry delivery
           path: munarium-registry
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-gate
-          ref: f8df9736045214c204921f358b296c27d58fc868
+          ref: 9d0687ad6e4d244e3bbb029b8a2853bdf39ed19d # Gate final-send admission and current artifact checks
           path: munarium-gate
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-warden
-          ref: f0bfdda6d11060dccdbc4cefc2a5b805c44c0d87
+          ref: fa6951ffdd83c74c0699ca217351562b2da28e5b # Warden live grants/custody
           path: munarium-warden
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -105,4 +105,20 @@ jobs:
           path: |
             munarium-harness/target/activation.json
             munarium-harness/target/activation.log
+          if-no-files-found: warn
+      - name: Live prepared release, lost replies and PostgreSQL restore
+        working-directory: munarium-harness
+        env:
+          STAGE2_DATABASE_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          image=$(docker inspect --format '{{.Image}}' "$STAGE2_DATABASE_CONTAINER")
+          python scripts/run_activation.py --workspace .. --output target/execution.json --owner github-actions-disposable-cell --database-image "$image" --execution
+      - name: Retain sanitized execution evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage2-execution-evidence
+          path: |
+            munarium-harness/target/execution.json
+            munarium-harness/target/execution.log
           if-no-files-found: warn

@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--owner", required=True)
+    parser.add_argument("--execution", action="store_true", help="Also run the prepared synthetic release composition")
     parser.add_argument("--database-image", required=True, help="Observed image digest; never a database URL")
     args = parser.parse_args()
     if not args.owner.strip() or not args.database_image.startswith("sha256:"):
@@ -39,15 +40,23 @@ def main():
         participant_outbox_delivery=True,
         exclusions=["action lifecycle outbox delivery", "snapshot restore", "execution", "target effects", "network and secret isolation"])
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    if args.execution:
+        if not os.environ.get("STAGE2_DATABASE_CONTAINER"):
+            raise ValueError("explicit owned database container required for snapshot/restore testing")
+        record.update(profile="stage2-prepared-release-v1", execution="synthetic-only",
+            openbao_image="ghcr.io/openbao/openbao:2.4.4@sha256:01bdba095690b1fe7cc1ec956ca422cfe01fd9a994ea28d9a6a2f84886dc9569",
+            exclusions=["dynamic Linux policy evaluation", "production qualification", "OS network and secret isolation", "automatic restore reopening"])
+        record["environment"]["resource_ceiling"] = "32 service requests; 480 seconds; OpenBao 256 MiB/1 CPU; caller owns database resource limits"
     log = args.output.with_suffix(".log")
     if log.exists():
         raise ValueError("refusing to replace prior evidence")
     with args.output.open("x", encoding="utf-8") as out:
         out.write(json.dumps(record, indent=2)+"\n")
     env = dict(os.environ, STAGE2_WORKSPACE=str(workspace), MUNARIUM_PLATFORM_TEST_BINARY=str(binaries["munarium"]))
+    env["STAGE2_EXECUTION"] = "1" if args.execution else "0"
     command = [sys.executable, "-m", "pytest", "tests/network/test_activation.py", "-q", "--tb=short", "--assert=plain", "-p", "no:cacheprovider"]
     try:
-        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, timeout=240)
+        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, timeout=480 if args.execution else 240)
         raw = result.stdout+result.stderr
         record.update(exit=result.returncode, status="passed" if result.returncode == 0 else "failed")
     except subprocess.TimeoutExpired as error:
