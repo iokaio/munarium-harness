@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium
-          ref: 6d07421f5e7bd0e275a03458ed8974580cc7d7f7 # Server participant PR 77
+          ref: 059ee3f3305e17d96581822827f182ce927db615 # Server participant PR 77
           path: munarium
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
