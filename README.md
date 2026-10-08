@@ -13,6 +13,9 @@ Harness is bypassed, modified or absent.
 > no execution endpoint is mounted. Human acceptance and production qualification
 > remain pending.
 
+The experimental [Stage 2 activation composition](docs/activation-profile.md)
+tests the five-service barrier and restart recovery. It does not execute an action.
+
 Harness is one of nine components built around the existing Munarium foundation, Munarium Server
 and Munarium Matrix. Their shared architecture, normative contracts, decision records, roadmap and
 composition evidence live in the public hub,

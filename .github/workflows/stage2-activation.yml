@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Stage 2 activation composition
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: stage2-activation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  activation:
+    name: Five-service activation and lost-response recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_USER: activation_test
+          POSTGRES_PASSWORD: activation-local-only
+          POSTGRES_DB: activation_server
+        ports: ["5434:5432"]
+        options: >-
+          --memory 768m --cpus 2
+          --health-cmd "pg_isready -U activation_test -d activation_server"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+      MUNARIUM_PLATFORM_TEST_DATABASE_URL: postgres://activation_test:activation-local-only@127.0.0.1:5434/activation_server
+      STAGE2_GATE_DATABASE_URL: postgres://activation_test:activation-local-only@127.0.0.1:5434/activation_gate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: munarium-harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium
+          ref: 059ee3f3305e17d96581822827f182ce927db615 # Server participant PR 77
+          path: munarium
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-council
+          ref: 6ea0822b6ad2da29ca051410289422d9ccaa4c54
+          path: munarium-council
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-registry
+          ref: eb08f75deaae664afd067194241ae4646c3d53ce
+          path: munarium-registry
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-gate
+          ref: bc429ebcce47579419d88daa6a6aee644fd34221
+          path: munarium-gate
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: iokaio/munarium-warden
+          ref: ef08b587b259600864e3b4f48935e44fa00b7134
+          path: munarium-warden
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Install pinned compiler
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            munarium/server
+            munarium-council
+            munarium-registry
+            munarium-gate
+            munarium-warden
+      - name: Build exact component revisions
+        run: |
+          cargo +1.98.1 build --locked --manifest-path munarium/server/Cargo.toml -p munarium-server
+          for repo in munarium-council munarium-registry munarium-gate munarium-warden; do
+            cargo +1.98.1 build --locked --manifest-path "$repo/Cargo.toml"
+          done
+          python -m pip install -e './munarium/clients/python[dev,platform-test]'
+      - name: Create isolated Gate database
+        env:
+          DATABASE_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec "$DATABASE_CONTAINER" createdb -U activation_test activation_gate
+      - name: Exercise and retain actual activation history
+        working-directory: munarium-harness
+        env:
+          DATABASE_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          image=$(docker inspect --format '{{.Image}}' "$DATABASE_CONTAINER")
+          python scripts/run_activation.py --workspace .. --output target/activation.json --owner github-actions-disposable-cell --database-image "$image"
+      - name: Retain sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage2-activation-evidence
+          path: |
+            munarium-harness/target/activation.json
+            munarium-harness/target/activation.log
+          if-no-files-found: warn
