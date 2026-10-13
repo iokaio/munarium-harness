@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-gate
-          ref: 9d0687ad6e4d244e3bbb029b8a2853bdf39ed19d # Gate final-send admission and current artifact checks
+          ref: d030c5e8b3f94974972e2a02c459886647e86a59 # Merged Gate admission plus Linux evaluator worker
           path: munarium-gate
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,6 +105,23 @@ jobs:
           path: |
             munarium-harness/target/activation.json
             munarium-harness/target/activation.log
+          if-no-files-found: warn
+      - name: Actual agent container isolation and governed prepared effects
+        working-directory: munarium-harness
+        env:
+          STAGE2_DATABASE_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          image=$(docker inspect --format '{{.Image}}' "$STAGE2_DATABASE_CONTAINER")
+          python scripts/run_activation.py --workspace .. --output target/isolation.json --owner github-actions-disposable-cell --database-image "$image" --execution --isolation
+      - name: Retain sanitized agent isolation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage2-agent-isolation-evidence
+          path: |
+            munarium-harness/target/isolation.json
+            munarium-harness/target/isolation.log
+            munarium-harness/target/isolation.agent.jsonl
           if-no-files-found: warn
       - name: Live prepared release, lost replies and PostgreSQL restore
         working-directory: munarium-harness

@@ -79,6 +79,7 @@ class Execution:
         self.stack.callback(lambda: subprocess.run(["docker", "rm", "-f", "-v", container], check=True, capture_output=True))
         port = subprocess.run(["docker", "port", container, "8200/tcp"], check=True, capture_output=True, text=True).stdout.strip().rsplit(":", 1)[1]
         bao = "http://127.0.0.1:"+port
+        self.bao_endpoint = bao
         with httpx.Client(trust_env=False, timeout=2) as client:
             for _ in range(100):
                 try:
@@ -129,6 +130,12 @@ class Execution:
 
     def exercise(self, clients, stop, start, faults, proxy):
         tenant = self.scope["tenant"]
+        boundary = None
+        if os.environ.get("STAGE2_ISOLATION") == "1":
+            from agent_isolation import Boundary
+            boundary = Boundary(self)
+            self.stack.callback(boundary.close)
+            boundary.probe()
 
         def call(owner, route, operation, peer="connector", **fields):
             return clients[peer].post(self.endpoints[owner]+route, json=dict(tenant=tenant, action=dict(operation=operation, **fields)))
@@ -145,8 +152,11 @@ class Execution:
             raise AssertionError("outbox did not drain")
 
         def ready(name, consume=True):
-            response = gate("prepare", peer="proposer", operation_id=name, attempt_id="attempt-"+name)
-            assert response.status_code == 200, "prepared request: "+response.text
+            if boundary is not None:
+                boundary.prepare(tenant, name)
+            else:
+                response = gate("prepare", peer="proposer", operation_id=name, attempt_id="attempt-"+name)
+                assert response.status_code == 200, "prepared request: "+response.text
             approval_id = "approval-"+name
             response = call("svc-council", "/v1/approvals", "approve", peer="human", id=approval_id, operation_id=name, attempt_id="attempt-"+name)
             assert response.status_code == 200, "distinct live approval: "+response.text
@@ -195,7 +205,10 @@ class Execution:
         def observe():
             response = clients["human"].post(self.target+"/observe", json={})
             assert response.status_code == 200
-            return response.json()
+            value = response.json()
+            if boundary is not None:
+                boundary.record("target-observation", sends=value["sends"], effects=len(value["effects"]), epoch=value["epoch"])
+            return value
 
         if self.case == "admission":
             ready("publish-one")

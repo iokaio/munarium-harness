@@ -18,8 +18,11 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--owner", required=True)
     parser.add_argument("--execution", action="store_true", help="Also run the prepared synthetic release composition")
+    parser.add_argument("--isolation", action="store_true", help="Run proposals and deny probes from the unprivileged Linux agent container")
     parser.add_argument("--database-image", required=True, help="Observed image digest; never a database URL")
     args = parser.parse_args()
+    if args.isolation and (not args.execution or sys.platform != "linux"):
+        raise ValueError("agent isolation requires Linux execution profile")
     if not args.owner.strip() or not args.database_image.startswith("sha256:"):
         raise ValueError("owner and observed image digest required")
     for name in ("MUNARIUM_PLATFORM_TEST_DATABASE_URL", "STAGE2_GATE_DATABASE_URL"):
@@ -48,12 +51,23 @@ def main():
             exclusions=["dynamic Linux policy evaluation", "production qualification", "OS network and secret isolation", "automatic restore reopening"])
         record["environment"]["resource_ceiling"] = "32 service requests; 480 seconds; OpenBao 256 MiB/1 CPU; caller owns database resource limits"
     log = args.output.with_suffix(".log")
+    if args.isolation:
+        record.update(profile="stage2-isolated-agent-v1", agent_image="python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f",
+            agent_boundary="unprivileged read-only container; two TLS relays; internal bridge with task-owned INPUT/FORWARD rules",
+            exclusions=["dynamic Linux policy evaluation", "production qualification", "per-service host isolation", "automatic restore reopening"])
+        record["environment"]["resource_ceiling"] += "; agent 128 MiB/1 CPU/16 tasks"
     if log.exists():
         raise ValueError("refusing to replace prior evidence")
     with args.output.open("x", encoding="utf-8") as out:
         out.write(json.dumps(record, indent=2)+"\n")
     env = dict(os.environ, STAGE2_WORKSPACE=str(workspace), MUNARIUM_PLATFORM_TEST_BINARY=str(binaries["munarium"]))
     env["STAGE2_EXECUTION"] = "1" if args.execution else "0"
+    env["STAGE2_ISOLATION"] = "1" if args.isolation else "0"
+    if args.isolation:
+        observations = args.output.with_suffix(".agent.jsonl")
+        with observations.open("x", encoding="utf-8"):
+            pass
+        env["STAGE2_AGENT_EVIDENCE_FILE"] = str(observations.resolve())
     command = [sys.executable, "-m", "pytest", "tests/network/test_activation.py", "-q", "--tb=short", "--assert=plain", "-p", "no:cacheprovider"]
     try:
         result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, timeout=480 if args.execution else 240)
@@ -62,6 +76,16 @@ def main():
     except subprocess.TimeoutExpired as error:
         raw = (error.stdout or b"")+(error.stderr or b"")
         record.update(exit=124, status="timed-out")
+    if args.isolation:
+        evidence = observations.read_bytes()
+        record["agent_observations_digest"] = sha(evidence)
+        record["agent_observations"] = [json.loads(line) for line in evidence.splitlines()]
+        required = {"probe", "prepare", "target-observation", "cleanup"}
+        complete = all(required <= {entry["phase"] for entry in record["agent_observations"] if entry["case"] == case}
+                       for case in ("effects", "admission"))
+        if record["exit"] == 0 and not complete:
+            record.update(exit=1, status="failed")
+            raw += b"\nIncomplete per-case agent isolation evidence\n"
     with log.open("xb") as out:
         out.write(raw)
     record.update(ended=stamp(), command=command, log_digest=sha(raw),
