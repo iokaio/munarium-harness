@@ -22,6 +22,7 @@ class Execution:
         self.directory = deployment["directory"]
         self.requests = {}
         self.case = case
+        self.dynamic = None
 
     def bindings(self, bindings, now, manifest_digest, policy_digest):
         self.authority_bindings = bindings
@@ -130,6 +131,7 @@ class Execution:
 
     def exercise(self, clients, stop, start, faults, proxy):
         tenant = self.scope["tenant"]
+        self.proposer_client = clients["proposer"]
         boundary = None
         if os.environ.get("STAGE2_ISOLATION") == "1":
             from agent_isolation import Boundary
@@ -151,12 +153,20 @@ class Execution:
                     return
             raise AssertionError("outbox did not drain")
 
-        def ready(name, consume=True):
-            if boundary is not None:
+        def propose(name):
+            if self.dynamic:
+                result = boundary.propose(tenant, name, self.requests[name]["intent"]["parameters"])
+                assert result["status"] == 200 and result["value"]["decision"]["outcome"] == "approval-required", "native dynamic proposal"
+                assert {v["kind"] for v in result["value"]["decision"]["obligations"]} == {"distinct-approval", "mandatory-recording", "action-capacity", "credential-custody"}
+                assert boundary.propose(tenant, name, self.requests[name]["intent"]["parameters"])["value"] == result["value"], "immutable agent retry"
+            elif boundary is not None:
                 boundary.prepare(tenant, name)
             else:
                 response = gate("prepare", peer="proposer", operation_id=name, attempt_id="attempt-"+name)
                 assert response.status_code == 200, "prepared request: "+response.text
+
+        def ready(name, consume=True):
+            propose(name)
             approval_id = "approval-"+name
             response = call("svc-council", "/v1/approvals", "approve", peer="human", id=approval_id, operation_id=name, attempt_id="attempt-"+name)
             assert response.status_code == 200, "distinct live approval: "+response.text
@@ -176,6 +186,7 @@ class Execution:
             config = dict(certificate=str(cert), key=str(key), ca=str(self.directory/"ca.pem"), tenant=tenant,
                 gate=gate_endpoint or self.endpoints["svc-gate"], warden=self.endpoints["svc-warden"], target=self.target,
                 operation_id=name, invocation=dict(scope=self.scope, kind="invocation", id="invoke-"+name), lose_reply=lose_reply)
+            config["case"] = self.case
             path = self.directory/(name+"-connector.json")
             if hold:
                 config["hold"] = str(self.directory/(name+"-hold"))
@@ -209,6 +220,9 @@ class Execution:
             if boundary is not None:
                 boundary.record("target-observation", sends=value["sends"], effects=len(value["effects"]), epoch=value["epoch"])
             return value
+
+        if self.dynamic:
+            self.dynamic.exercise(self, boundary, gate, call, observe, stop, start, faults, proxy)
 
         if self.case == "admission":
             ready("publish-one")
@@ -268,8 +282,7 @@ class Execution:
         assert observe() == second
         flush()
         # Pending/uncertain exposure retains the cap even though both workers ended.
-        response = gate("prepare", peer="proposer", operation_id="lost-admission", attempt_id="attempt-lost-admission")
-        assert response.status_code == 200
+        propose("lost-admission")
         response = call("svc-council", "/v1/approvals", "approve", peer="human", id="approval-lost-admission", operation_id="lost-admission", attempt_id="attempt-lost-admission")
         assert response.status_code == 200
         assert call("svc-council", "/v1/approvals", "flush").status_code == 200

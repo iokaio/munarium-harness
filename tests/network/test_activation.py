@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """PYTEST_DONT_REWRITE
 Actual five-service activation with one lost response after each durable phase.
-No evaluator, connector, grant or target effect is exercised by this profile.
+Optional execution/isolation/dynamic profiles exercise native action effects.
 """
 from contextlib import ExitStack
 import copy
@@ -63,13 +63,20 @@ def test_real_activation_barrier(execution_case):
         vectors = json.loads((workspace / "munarium-registry/contracts/registry-v2/signed-vectors.json").read_bytes())
         manifest = json.loads(vectors["cases"][0]["payload"])
         manifest["tenant"] = tenant
+        records = json.loads((workspace / "munarium-council/contracts/stage2-v1/vectors.json").read_bytes())["records"]
+        dynamic = None
+        if os.environ.get("STAGE2_DYNAMIC") == "1":
+            assert execution_enabled and os.environ.get("STAGE2_ISOLATION") == "1"
+            from dynamic_fixture import Dynamic
+            dynamic = Dynamic(fixture, workspace, catalog, manifest, records)
         envelope = sign(publisher, dict(alg="Ed25519", kid="key-1", typ="munarium-manifest+jws"), manifest)
         manifest_digest = digest("munarium:manifest:v2", manifest)
         policy_bytes = {"purpose": "activation-composition-only"}
         if execution_enabled:
             policy_bytes = {"purpose": "operator-prepared-disposable-release", "operation": "release.publish_approved_artifact", "limit": 2}
+        if dynamic:
+            policy_bytes = dynamic.policy
         policy_digest = digest("munarium:decision-policy:v1", policy_bytes)
-        records = json.loads((workspace / "munarium-council/contracts/stage2-v1/vectors.json").read_bytes())["records"]
         transition = records["activation"]
         transition["scope"] = transition["transition"]["scope"] = transition["ratification"]["scope"] = scope
         transition.update(not_before=now-10, expires_at=now+600,
@@ -118,6 +125,9 @@ def test_real_activation_barrier(execution_case):
             from execution_fixture import Execution
             execution = Execution(fixture, d, workspace, stack, scope, identities, endpoints, records, execution_case)
             execution.bindings(bindings, now, manifest_digest, policy_digest)
+            execution.dynamic = dynamic
+            if dynamic:
+                dynamic.enroll(execution, bindings, now)
         governance = dict(schema_version=1, bindings=bindings, retire_bootstrap=False, successor_keys={})
         path = {"tenant": tenant}
         state = d["api"].get_platform_authority(ApiRequest(path=path)).json()
@@ -133,7 +143,7 @@ def test_real_activation_barrier(execution_case):
                 pass
 
             def forward(self):
-                caller = next((p for p in names + (("connector",) if execution_enabled else ()) if identities[p][2] == hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest()), None)
+                caller = next((p for p in names + (("connector", "proposer") if execution_enabled else ()) if identities[p][2] == hashlib.sha256(self.connection.getpeercert(binary_form=True)).hexdigest()), None)
                 if caller is None:
                     self.send_error(403)
                     return
@@ -162,6 +172,10 @@ def test_real_activation_barrier(execution_case):
                     self.close_connection = True
                     return
                 content = response.content
+                if response.status_code == 200 and operation == "action-archive" and faults.get("archive_wrong"):
+                    wrong = response.json()
+                    wrong["digest"] = "sha256:" + "0" * 64
+                    content = canonical(wrong)
                 if response.status_code == 200 and operation == "action-append" and caller == faults["delivery"]:
                     faults["acks"][caller] = response.json()
                     if faults["mode"] == "lost":
@@ -220,6 +234,8 @@ def test_real_activation_barrier(execution_case):
             configs[p]["server_endpoint"] = proxy
         if execution:
             execution.configure(configs, sign, provider, now)
+            if dynamic:
+                configs["svc-gate"]["evaluator"] = dynamic.evaluator
         processes = {}
 
         def stop(name):
@@ -238,6 +254,8 @@ def test_real_activation_barrier(execution_case):
             repo = "munarium-"+name.removeprefix("svc-")
             binary = workspace / repo / "target/debug" / (repo+(".exe" if os.name == "nt" else ""))
             env = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP") if k in os.environ}
+            if name == "svc-gate" and dynamic:
+                env["MUNARIUM_OPA_CGROUP_ROOT"] = os.environ["MUNARIUM_OPA_CGROUP_ROOT"]
             processes[name] = subprocess.Popen([str(binary), str(config)], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             deadline = time.monotonic()+15
             route = {"svc-council": "/v1/transitions", "svc-gate": "/v1/actions", "svc-registry": "/v1/activation", "svc-warden": "/v1/activation"}[name]
