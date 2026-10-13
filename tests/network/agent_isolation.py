@@ -122,8 +122,13 @@ class Boundary:
 
     def run(self, spec):
         spec.update(gateway=self.gateway, gate=self.gate, warden=self.warden)
-        result = command("docker", "exec", "-i", self.container, "python", "/run/agent/probe.py",
-                         input=json.dumps(spec).encode())
+        result = subprocess.run(["docker", "exec", "-i", self.container, "python", "/run/agent/probe.py"],
+                                input=json.dumps(spec).encode(), capture_output=True, timeout=30)
+        if result.returncode:
+            # The probe emits only fixed diagnostic labels; never print its input,
+            # service responses, environment or mounted identity bytes.
+            lines = result.stderr.decode(errors="replace").splitlines()
+            raise AssertionError("agent probe refused: " + (lines[-1] if lines else "no diagnostic"))
         return json.loads(result.stdout)
 
     def probe(self):

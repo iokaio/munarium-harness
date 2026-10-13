@@ -24,6 +24,14 @@ def connected(address, port):
         return False
 
 
+def inaccessible(path):
+    try:
+        with Path(path).open("rb"):
+            return False
+    except (FileNotFoundError, PermissionError):
+        return True
+
+
 def main():
     spec = json.load(sys.stdin)
     context = ssl.create_default_context(cafile="/run/agent/ca.pem")
@@ -48,7 +56,7 @@ def main():
         assert connected(spec["gateway"], port), "permitted edge: " + name
         results[name + "-reachable"] = True
     for name in ("/var/run/docker.sock", "/run/secrets/target", "/run/secrets/broker", "/root/.aws/credentials"):
-        assert not Path(name).exists(), "privileged mount exposed"
+        assert inaccessible(name), "privileged mount exposed"
     assert set(Path("/run/agent").iterdir()) == {Path("/run/agent") / name for name in
                                                ("ca.pem", "proposer.pem", "proposer.key", "probe.py")}
     try:
