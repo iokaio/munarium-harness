@@ -36,8 +36,8 @@ def main():
     spec = json.load(sys.stdin)
     context = ssl.create_default_context(cafile="/run/agent/ca.pem")
     context.load_cert_chain("/run/agent/proposer.pem", "/run/agent/proposer.key")
-    if spec["operation"] == "prepare":
-        service = Service(spec["gateway"], spec["gate"], context=context, timeout=5)
+    if spec["operation"] in ("prepare", "propose"):
+        service = Service(spec["gateway"], spec["gate"], context=context, timeout=15 if spec["operation"] == "propose" else 5)
         service.request("POST", "/v1/actions", json.dumps(spec["request"]), {"Content-Type": "application/json"})
         response = service.getresponse()
         value = json.loads(response.read(65537))

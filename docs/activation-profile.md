@@ -71,6 +71,9 @@ This remains activation/audit integration, not action effect qualification.
 
 ## Prepared synthetic release extension
 
+The separate [dynamic release profile](dynamic-profile.md) adds native evaluation
+and enrolled agent parameters while preserving the prepared histories below.
+
 The separate [agent isolation extension](agent-isolation.md) runs those proposals
 and bypass probes from an unprivileged Linux container. Its evidence has its own
 scope; the default native-process history still does not test OS isolation.

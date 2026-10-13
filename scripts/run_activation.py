@@ -19,10 +19,13 @@ def main():
     parser.add_argument("--owner", required=True)
     parser.add_argument("--execution", action="store_true", help="Also run the prepared synthetic release composition")
     parser.add_argument("--isolation", action="store_true", help="Run proposals and deny probes from the unprivileged Linux agent container")
+    parser.add_argument("--dynamic", action="store_true", help="Evaluate enrolled agent parameters with pinned native Linux OPA and real owners")
     parser.add_argument("--database-image", required=True, help="Observed image digest; never a database URL")
     args = parser.parse_args()
     if args.isolation and (not args.execution or sys.platform != "linux"):
         raise ValueError("agent isolation requires Linux execution profile")
+    if args.dynamic and not args.isolation:
+        raise ValueError("dynamic composition requires actual Linux agent isolation")
     if not args.owner.strip() or not args.database_image.startswith("sha256:"):
         raise ValueError("owner and observed image digest required")
     for name in ("MUNARIUM_PLATFORM_TEST_DATABASE_URL", "STAGE2_GATE_DATABASE_URL"):
@@ -56,6 +59,17 @@ def main():
             agent_boundary="unprivileged read-only container; two TLS relays; internal bridge with task-owned INPUT/FORWARD rules",
             exclusions=["dynamic Linux policy evaluation", "production qualification", "per-service host isolation", "automatic restore reopening"])
         record["environment"]["resource_ceiling"] += "; agent 128 MiB/1 CPU/16 tasks"
+    if args.dynamic:
+        executable = Path(os.environ["OPA_LINUX_EXECUTABLE"]).resolve(strict=True)
+        worker = workspace / "munarium-gate/scripts/opa_worker_linux.py"
+        record.update(profile="stage2-dynamic-isolated-agent-v1",
+            evaluator=dict(version="1.21.1", executable_digest=sha(executable.read_bytes()), worker_digest=sha(worker.read_bytes()),
+                           boundary="fresh cgroup v2 child; 64 MiB, zero swap, 16 tasks, one CPU; 100 ms evaluation"),
+            evidence_profile="immutable canonical test-result v1 from signed Server owner enrollment",
+            exclusions=["production qualification", "per-service host isolation", "automatic restore reopening", "arbitrary tasks and evidence derivations"])
+        record["contracts"] = dict(stage2_vectors_digest=sha((workspace / "munarium-council/contracts/stage2-v1/vectors.json").read_bytes()),
+                                   registry_bundle_lock_digest=sha((workspace / "munarium-registry/contracts/registry-v2/bundle-lock.json").read_bytes()))
+        record["environment"]["resource_ceiling"] = "two histories; 480 seconds; evaluator 64 MiB/1 CPU/16 tasks; agent 128 MiB/1 CPU/16 tasks; OpenBao 256 MiB/1 CPU; caller owns database resource limits"
     if log.exists():
         raise ValueError("refusing to replace prior evidence")
     with args.output.open("x", encoding="utf-8") as out:
@@ -63,6 +77,7 @@ def main():
     env = dict(os.environ, STAGE2_WORKSPACE=str(workspace), MUNARIUM_PLATFORM_TEST_BINARY=str(binaries["munarium"]))
     env["STAGE2_EXECUTION"] = "1" if args.execution else "0"
     env["STAGE2_ISOLATION"] = "1" if args.isolation else "0"
+    env["STAGE2_DYNAMIC"] = "1" if args.dynamic else "0"
     if args.isolation:
         observations = args.output.with_suffix(".agent.jsonl")
         with observations.open("x", encoding="utf-8"):
@@ -81,6 +96,8 @@ def main():
         record["agent_observations_digest"] = sha(evidence)
         record["agent_observations"] = [json.loads(line) for line in evidence.splitlines()]
         required = {"probe", "prepare", "target-observation", "cleanup"}
+        if args.dynamic:
+            required = {"probe", "propose", "dynamic-controls", "target-observation", "cleanup"}
         complete = all(required <= {entry["phase"] for entry in record["agent_observations"] if entry["case"] == case}
                        for case in ("effects", "admission"))
         if record["exit"] == 0 and not complete:

@@ -26,15 +26,15 @@ def rule(*args):
     command("sudo", "-n", "iptables", "-w", "5", *args)
 
 
-def relay(address, backend, stack):
+def relay(address, backend, stack, idle_timeout=5):
     class Handler(socketserver.BaseRequestHandler):
         def handle(self):
             try:
                 with socket.create_connection(backend, timeout=5) as remote:
-                    self.request.settimeout(5)
+                    self.request.settimeout(idle_timeout)
                     peers = (self.request, remote)
                     while True:
-                        readable, _, _ = select.select(peers, [], [], 5)
+                        readable, _, _ = select.select(peers, [], [], idle_timeout)
                         if not readable:
                             return
                         for source in readable:
@@ -71,7 +71,8 @@ class Boundary:
             assert info["Internal"] is True, "internal agent network"
             self.gateway = str(ipaddress.ip_address(info["IPAM"]["Config"][0]["Gateway"]))
             bridge = "br-" + network[:12]
-            self.gate = relay(self.gateway, ("127.0.0.1", urlsplit(execution.endpoints["svc-gate"]).port), self.stack)
+            self.gate = relay(self.gateway, ("127.0.0.1", urlsplit(execution.endpoints["svc-gate"]).port), self.stack,
+                              idle_timeout=20 if execution.dynamic else 5)
             self.warden = relay(self.gateway, ("127.0.0.1", urlsplit(execution.endpoints["svc-warden"]).port), self.stack)
             rule("-N", self.chain)
             self.stack.callback(rule, "-X", self.chain)
@@ -155,6 +156,16 @@ class Boundary:
         self.record("prepare", operation=name, outcome=result["value"]["decision"]["outcome"],
                     request_digest=result["value"]["decision"]["request_digest"])
         return result["value"]
+
+    def propose(self, tenant, name, parameters):
+        result = self.run(dict(operation="propose", request=dict(tenant=tenant,
+            action=dict(operation="propose", operation_id=name, attempt_id="attempt-" + name, parameters=parameters))))
+        facts = dict(operation=name, status=result["status"])
+        if result["status"] == 200:
+            facts.update(outcome=result["value"]["decision"]["outcome"],
+                         request_digest=result["value"]["decision"]["request_digest"])
+        self.record("propose", **facts)
+        return result
 
     def record(self, phase, **facts):
         path = Path(os.environ["STAGE2_AGENT_EVIDENCE_FILE"])
