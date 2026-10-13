@@ -186,6 +186,7 @@ class Execution:
             config = dict(certificate=str(cert), key=str(key), ca=str(self.directory/"ca.pem"), tenant=tenant,
                 gate=gate_endpoint or self.endpoints["svc-gate"], warden=self.endpoints["svc-warden"], target=self.target,
                 operation_id=name, invocation=dict(scope=self.scope, kind="invocation", id="invoke-"+name), lose_reply=lose_reply)
+            config["case"] = self.case
             path = self.directory/(name+"-connector.json")
             if hold:
                 config["hold"] = str(self.directory/(name+"-hold"))
