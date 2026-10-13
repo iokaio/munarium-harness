@@ -47,3 +47,6 @@ retains `qualification:false` and lists dynamic evaluation, per-service host iso
 production and restore reopening as exclusions. Source/binary/image/log pins and
 all failed attempts are retained. The additive hosted step preserves the original
 activation and execution histories and publishes its own sanitized evidence.
+Each case also retains the actual per-edge results, inspected container boundary,
+agent proposal digest, independent target counts and owned-resource cleanup receipt.
+Successful pytest exit with missing case phases is a failed evidence attempt.

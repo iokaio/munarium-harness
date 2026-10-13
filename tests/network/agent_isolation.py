@@ -143,13 +143,24 @@ class Boundary:
             denied.append((name, self.gateway, urlsplit(os.environ[variable]).port or 5432))
         result = self.run(dict(operation="probe", denied=denied))
         assert result["status"] == "passed", "agent denied-edge evidence"
+        expected = {entry[0] for entry in denied} | {"gate-reachable", "warden-reachable", "mount-read-only", "privileged-mounts-absent"}
+        assert set(result["checks"]) == expected and all(v is True for v in result["checks"].values()), "complete denied-edge matrix"
+        self.record("probe", checks=result["checks"], container_inspection="passed")
         print("agent isolation evidence: permitted service edges, denied target/broker/stores/authority/metadata/egress and exact read-only mounts passed")
 
     def prepare(self, tenant, name):
         result = self.run(dict(operation="prepare", request=dict(tenant=tenant,
                          action=dict(operation="prepare", operation_id=name, attempt_id="attempt-" + name))))
         assert result["status"] == 200, "actual agent prepared request"
+        self.record("prepare", operation=name, outcome=result["value"]["decision"]["outcome"],
+                    request_digest=result["value"]["decision"]["request_digest"])
         return result["value"]
+
+    def record(self, phase, **facts):
+        path = Path(os.environ["STAGE2_AGENT_EVIDENCE_FILE"])
+        with path.open("a", encoding="utf-8") as out:
+            out.write(json.dumps(dict(case=self.execution.case, phase=phase, **facts), sort_keys=True) + "\n")
 
     def close(self):
         self.stack.close()
+        self.record("cleanup", owned_resources_removed=True)

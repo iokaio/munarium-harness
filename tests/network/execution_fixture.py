@@ -205,7 +205,10 @@ class Execution:
         def observe():
             response = clients["human"].post(self.target+"/observe", json={})
             assert response.status_code == 200
-            return response.json()
+            value = response.json()
+            if boundary is not None:
+                boundary.record("target-observation", sends=value["sends"], effects=len(value["effects"]), epoch=value["epoch"])
+            return value
 
         if self.case == "admission":
             ready("publish-one")

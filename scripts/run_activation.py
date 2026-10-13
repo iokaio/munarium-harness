@@ -63,6 +63,11 @@ def main():
     env = dict(os.environ, STAGE2_WORKSPACE=str(workspace), MUNARIUM_PLATFORM_TEST_BINARY=str(binaries["munarium"]))
     env["STAGE2_EXECUTION"] = "1" if args.execution else "0"
     env["STAGE2_ISOLATION"] = "1" if args.isolation else "0"
+    if args.isolation:
+        observations = args.output.with_suffix(".agent.jsonl")
+        with observations.open("x", encoding="utf-8"):
+            pass
+        env["STAGE2_AGENT_EVIDENCE_FILE"] = str(observations.resolve())
     command = [sys.executable, "-m", "pytest", "tests/network/test_activation.py", "-q", "--tb=short", "--assert=plain", "-p", "no:cacheprovider"]
     try:
         result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, timeout=480 if args.execution else 240)
@@ -71,6 +76,16 @@ def main():
     except subprocess.TimeoutExpired as error:
         raw = (error.stdout or b"")+(error.stderr or b"")
         record.update(exit=124, status="timed-out")
+    if args.isolation:
+        evidence = observations.read_bytes()
+        record["agent_observations_digest"] = sha(evidence)
+        record["agent_observations"] = [json.loads(line) for line in evidence.splitlines()]
+        required = {"probe", "prepare", "target-observation", "cleanup"}
+        complete = all(required <= {entry["phase"] for entry in record["agent_observations"] if entry["case"] == case}
+                       for case in ("effects", "admission"))
+        if record["exit"] == 0 and not complete:
+            record.update(exit=1, status="failed")
+            raw += b"\nIncomplete per-case agent isolation evidence\n"
     with log.open("xb") as out:
         out.write(raw)
     record.update(ended=stamp(), command=command, log_digest=sha(raw),
