@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iokaio/munarium-gate
-          ref: 0b4be9c28c7a5fa5eff5d70eb8256aecb559c8ae # Merged dynamic Gate service and native evaluator
+          ref: 28f80b4054a45e29677cb72c495edefc701f47ab # Merged dynamic Gate identity preflight and native evaluator
           path: munarium-gate
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

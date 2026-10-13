@@ -6,15 +6,39 @@ import io
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import httpx
+
+class HTTPError(Exception):
+    pass
+
+
+class HTTPStatusError(HTTPError):
+    def __init__(self, response):
+        self.response = response
+
+
+class Response:
+    def __init__(self, status, value=None, content=b""):
+        self.status_code, self.value, self.content = status, value, content
+
+    def json(self):
+        return self.value
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise HTTPStatusError(self)
 
 spec = importlib.util.spec_from_file_location("release_connector", Path(__file__).resolve().parents[1] / "tests/network/release_connector.py")
 connector = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(connector)
+# Unit-only transport double: the public client gate remains standard-library-only.
+# The real five-service suite imports the real httpx dependency independently.
+with patch.dict(sys.modules, httpx=SimpleNamespace(HTTPError=HTTPError, HTTPStatusError=HTTPStatusError, Client=None)):
+    spec.loader.exec_module(connector)
 
 
 class Evidence(unittest.TestCase):
@@ -27,14 +51,13 @@ class Evidence(unittest.TestCase):
 
             def post(self, url, **fields):
                 action = fields["json"]["action"]["operation"]
-                request = httpx.Request("POST", url)
                 if action == "claim-lookup":
-                    return httpx.Response(200, json={"binding": {"request": {}}}, request=request)
+                    return Response(200, {"binding": {"request": {}}})
                 if action == "custody":
-                    return httpx.Response(200, content=secret.encode(), request=request)
+                    return Response(200, content=secret.encode())
                 if action == "final-send":
-                    return httpx.Response(403, json={"error": "Refused", "private": secret}, request=request)
-                return httpx.Response(200, json={}, request=request)
+                    return Response(403, {"error": "Refused", "private": secret})
+                return Response(200, {})
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "connector.json"

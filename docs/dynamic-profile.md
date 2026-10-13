@@ -17,6 +17,13 @@ is `test-result` v1, not arbitrary Server/Matrix retrieval. The native policy pe
 only a verified passed result for the proposed artifact. Exact distinct approval,
 recording, action capacity and credential custody remain required before dispatch.
 
+Gate's [ADR 0017](https://github.com/iokaio/munarium-platform/blob/513543df9cf17ada46feffcf590883d16b950980/docs/decisions/0017-scoped-registry-assertions.md)
+preflight verifies its scoped Registry read identity before custody and retains only
+that signed identity in bounded private memory. Every owner query remains live.
+This avoids repeated usability waits during Warden's before/after broker checks
+and final admission, while preserving five-second custody and two-second clock
+margins. Assertion bytes never enter agent responses or evidence.
+
 The extra controls exercise actual native denial, stale evidence, parameter/context
 substitution, foreign tenant/actor, prepared-request bypass, incorrect real Server
 archive receipts, loss of a committed proposal reply, restart with immutable retry
