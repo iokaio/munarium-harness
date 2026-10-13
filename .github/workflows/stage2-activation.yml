@@ -121,6 +121,7 @@ jobs:
           path: |
             munarium-harness/target/isolation.json
             munarium-harness/target/isolation.log
+            munarium-harness/target/isolation.agent.jsonl
           if-no-files-found: warn
       - name: Live prepared release, lost replies and PostgreSQL restore
         working-directory: munarium-harness
