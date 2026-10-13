@@ -71,6 +71,10 @@ This remains activation/audit integration, not action effect qualification.
 
 ## Prepared synthetic release extension
 
+The separate [agent isolation extension](agent-isolation.md) runs those proposals
+and bypass probes from an unprivileged Linux container. Its evidence has its own
+scope; the default native-process history still does not test OS isolation.
+
 Run `scripts/run_activation.py --execution` with the same arguments and database
 inputs above, plus `STAGE2_DATABASE_CONTAINER` set to the exact caller-owned
 PostgreSQL container ID. The runner retains each attempt separately; it refuses to
